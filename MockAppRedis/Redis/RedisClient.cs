@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using StackExchange.Redis;
 
 
@@ -30,7 +31,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
     /// <summary>
     /// The specific logger for this client
     /// </summary>
-    private readonly ILogger<RedisClient> _log;
+    private readonly ILogger _log;
     
     /// <summary>
     /// To detect redundant calls
@@ -56,7 +57,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
     /// <param name="endPoints">Endpoint addresses for the Redis service.</param>
     /// <param name="channelPrefix">Channel prefix to separate the channels</param>
 
-    public RedisClient(List<string> endPoints, string? channelPrefix, ILogger<RedisClient> logger)
+    public RedisClient(List<string> endPoints, string? channelPrefix, ILogger logger)
     {
         if (endPoints == null || endPoints.Count == 0)
             throw new ArgumentNullException(nameof(endPoints));
@@ -102,77 +103,68 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
 
     #region TryGet
     /// <inheritdoc />
-    public T TryGet<T>(string key)
+    public bool TryGet<T>(string key, out T value)
     {
-        if (string.IsNullOrEmpty(key))
-            throw new ArgumentNullException(nameof(key));
-        
+        // Validation
+        ValidateKey(key);
+
+        // Set default 
+        value = default;
         key = GetPrefixKey(key);
-        RedisValue getValue;
         
+        // Get data
+        RedisValue rawString;
         try
         {
             var db = _redisConnection.GetDatabase();
 
             //Check if the key exists in the store
             if (!db.KeyExists(key))
-                return default;
+                return false;
             
             //Get value from the store
-            getValue = db.StringGet(key);
+            rawString = db.StringGet(key);
         }
         catch (Exception ex)
         {
             _log.LogError($"Error while getting key '{key}': {ex.Message}");
-            return default;
+            return false;
         }
 
-        try
-        {
-            return JsonSerializer.Deserialize<T>(getValue);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error while deserializing json string to object for key '{key}': {ex.Message}");
-            return default;
-        }
+        return TryDeserialize(key, rawString, out value);
     }
     /// <inheritdoc />
-    public async Task<T?> TryGetAsync<T>(string key, CancellationToken cancellationToken)
+    public async Task<(bool success, T? value)> TryGetAsync<T>(string key, CancellationToken cancellationToken)
     {
         //TODO in future implement use cancellationToken  
-        if (string.IsNullOrEmpty(key))
-            throw new ArgumentNullException(nameof(key));
+        // Validation
+        ValidateKey(key);
         
+        // Build prefix 
         key = GetPrefixKey(key);
-        RedisValue getValue;
         
+        // Get data 
+        RedisValue rawString;
         try
         {
             var db = _redisConnection.GetDatabase();
 
             //Check if the key exists in the store
-            if (!db.KeyExists(key))
-                return default;
+            if (! await db.KeyExistsAsync(key))
+                return (false, default);
             
             //Get value from the store
-            getValue = await db.StringGetAsync(key);
+            rawString = await db.StringGetAsync(key);
         }
         catch (Exception ex)
         {
             _log.LogError($"Error while getting key '{key}': {ex.Message}");
-            return default;
+            return (false, default);
         }
 
-        try
-        {
-            return JsonSerializer.Deserialize<T>(getValue);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error while deserializing json string to object for key '{key}': {ex.Message}");
-            return default;
-        }
+        var success = TryDeserialize(key, rawString, out T? value);
+        
+        return (success, value);
     }
 
     #endregion
@@ -217,7 +209,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
     }
     /// <inheritdoc />
-    public async Task<T> GetUntilValueAsync<T>(string key, CancellationToken cancellationToken, TimeSpan waitTimeout)
+    public async Task<T?> GetUntilValueAsync<T>(string key, CancellationToken cancellationToken, TimeSpan waitTimeout)
     {
         key = GetPrefixKey(key);
 
@@ -252,7 +244,8 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
 
             _log.LogInformation("GetUntilValueAsync on '{KeyName}': took {TimeOutValue}", key, timeOut.Elapsed);
 
-            return JsonSerializer.Deserialize<T>(stringValue);
+            var success = TryDeserialize(key, stringValue, out T? deserializedValue);
+            return !success ? default : deserializedValue;
         }
         catch (TimeoutException)
         {
@@ -279,7 +272,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         key = GetPrefixKey(key);
 
         // Serializer  
-        var setValue = TrySerialize(value);
+        var success = TrySerialize(value, out var setValue);
+        if (!success)
+            return false;
 
         try
         {
@@ -305,7 +300,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         key = GetPrefixKey(key);
 
         // Serializer  
-        var setValue = TrySerialize(value);
+        var success = TrySerialize(value, out var setValue);
+        if (!success)
+            return false;
 
         try
         {
@@ -332,7 +329,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateValue(value);
 
         // Serialize
-        var valueToAdd = TrySerialize(value);
+        var success = TrySerialize(value, out var valueToAdd);
+        if (!success)
+            return false;
 
         try
         {
@@ -355,7 +354,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateValue(value);
 
         // Serialize
-        var valueToAdd = TrySerialize(value);
+        var success = TrySerialize(value, out var valueToAdd);
+        if (!success)
+            return false;
 
         try
         {
@@ -382,7 +383,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateValue(value);
         
         // Serialize
-        var valueToRemove = TrySerialize(value);
+        var success = TrySerialize(value, out var valueToRemove);
+        if (!success)
+            return false;
         
         try
         {
@@ -405,7 +408,9 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateValue(value);
         
         // Serialize
-        var valueToRemove = TrySerialize(value);
+        var success = TrySerialize(value, out var valueToRemove);
+        if (!success)
+            return false;
         
         try
         {
@@ -490,13 +495,14 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateMessage(message);
 
         //Serialization 
-        var publishValue = TrySerialize(topic, message);
-        if (publishValue == RedisValue.Null)
+        var success = TrySerialize(topic, message, out var publishValue);
+        if (!success)
             return false;
 
         //Publish 
         try
         {
+            _log.LogInformation($"Publish on {topic} : {publishValue}");
             var sub = _redisConnection.GetSubscriber();
             _ = sub.Publish(topic, publishValue);
             return true;
@@ -518,8 +524,8 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         ValidateMessage(message);
 
         //Serialization 
-        var publishValue = TrySerialize(topic, message);
-        if (publishValue == RedisValue.Null)
+        var success = TrySerialize(topic, message, out var publishValue );
+        if (success)
             return false;
         
         //Publish 
@@ -558,10 +564,48 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
     {
         return SubscribeInternal(topic, executionMethod, true);
     }
-    /// <inheritdoc />
-    public Task<bool> SubscribeConcurrentlyAsync<T>(string topic, Action<T> executionMethod, CancellationToken cancellationToken)
+
+    public Task SubscribeConcurrentlyAsync<T>(string topic, Action<T> executionMethod, CancellationToken cancellationToken)
     {
-        return SubscribeInternalAsync(topic, executionMethod, true);
+        throw new NotImplementedException();
+    }
+
+
+    public async Task SubscribeConcurrentlyAsync(string topic, Action action, CancellationToken cancellationToken)
+    {
+        // var distributedWorkItem = action is IDistributedWorkItem;
+        // if (!distributedWorkItem)
+        // {
+        //     _log.LogInformation($"Given action is not a distributed work item: {topic}");
+        //     return;
+        // }
+        topic = GetPrefixKey(topic);
+            
+        
+        var sub = _redisConnection.GetSubscriber();
+        var counter = 0;
+        var distributedQueue = new DistributedQueue<IDistributedWorkItem?>(
+            "Vertex",
+            (item, token) =>
+            {
+                action();
+                Interlocked.Increment(ref counter);
+            },
+            NullLogger<DistributedQueue<IDistributedWorkItem?>>.Instance, 
+            10,
+            cancellationToken
+        );
+        _log.LogInformation($"Subscribed to topic: {topic}");
+        var channelQueue = sub.Subscribe(topic);
+
+       
+        channelQueue.OnMessage((m) =>
+        {
+            _log.LogInformation($"New message on topic: {topic} worker {counter}");
+            var deserializedWorkItem = JsonSerializer.Deserialize<IDistributedWorkItem>(m.Message);
+            distributedQueue.TryEnqueueWorkItem(deserializedWorkItem);
+        });
+        await Task.Run(() => distributedQueue.ScheduleWorkItems());
     }
 
     #endregion
@@ -712,6 +756,8 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
     }
 
+    #region Validation
+    
     private static void ValidateValue<T>(T value)
     {
         if (Equals(value, default(T)) && typeof(T) != typeof(bool))
@@ -739,35 +785,79 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         if (executionMethod == null)
             throw new ArgumentNullException(nameof(executionMethod));
     }
-
-    private RedisValue TrySerialize<T>(string topic, T message)
+    #endregion
+    
+    
+    #region Serialize & Deserialize 
+    /// <summary>
+    /// Try to serialize message  
+    /// </summary>
+    /// <param name="message">Input to serialize</param>
+    /// <param name="serializedValue">Output of serialization</param>
+    /// <param name="topic">Topic where serialization for is preformed</param>
+    /// <typeparam name="T">Type of the value</typeparam>
+    /// <returns>True if the value is set, false if not.</returns>
+    private bool TrySerialize<T>(string topic, T message, out RedisValue serializedValue)
     {
-        var publishValue = new RedisValue(null);
+        serializedValue = default;
         try
         {
-            publishValue = JsonSerializer.Serialize(message);
+            serializedValue = JsonSerializer.Serialize(message);
+            return true;
         }
         catch (Exception ex)
         {
+            // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
             _log.LogError($"Error while serializing object to json string from {topic} : {ex.Message}");
+            return false;
         }
-
-        return publishValue;
     }
 
-    private RedisValue TrySerialize<T>(T value)
+    /// <summary>
+    /// Try to serialize value 
+    /// </summary>
+    /// <param name="value">Input to serialize</param>
+    /// <param name="serializedValue">Output of serialization</param>
+    /// <typeparam name="T">Type of the value</typeparam>
+    /// <returns>True if the value is set, false if not.</returns>
+    private bool TrySerialize<T>(T value, out RedisValue serializedValue)
     {
-        var setValue = new RedisValue(null);
+        serializedValue = default;
         try
         {
-            setValue = JsonSerializer.Serialize(value);
+            serializedValue = JsonSerializer.Serialize(value);
+            return true;
         }
         catch (Exception e)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
             _log.LogError($"Error while serializing object to json string for value {value}: {e.Message}");
+            return false;
         }
-
-        return setValue;
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="key">Key where deserialization for is preformed</param>
+    /// <param name="value">Input to deserialize</param>
+    /// <param name="deserializedValue">Output of deserialization</param>
+    /// <typeparam name="T">Type of the value</typeparam>
+    /// <returns>True if the value is set, false if not.</returns>
+    private bool TryDeserialize<T>(string key, string value, out T? deserializedValue)
+    {
+        deserializedValue = default;
+        try
+        {
+            deserializedValue = JsonSerializer.Deserialize<T>(value);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
+            _log.LogError($"Error while deserializing json string to object for key '{key}': {ex.Message}");
+            return false;
+        }
+    }
+    #endregion
 }

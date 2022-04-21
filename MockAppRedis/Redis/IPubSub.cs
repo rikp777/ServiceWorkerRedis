@@ -57,7 +57,7 @@ public interface IPubSub
     /// <param name="executionMethod"><see cref="Action"/> to execute when a message gets sent to the channel.</param>
     /// <param name="cancellationToken">to cancel the process</param>
     /// <returns><see cref="Task"/> containing True if subscribing succeeded, false if not.</returns>
-    Task<bool> SubscribeConcurrentlyAsync<T>(string topic, Action<T> executionMethod, CancellationToken cancellationToken);
+    Task SubscribeConcurrentlyAsync<T>(string topic, Action<T> executionMethod, CancellationToken cancellationToken);
     #endregion
 
     #region UnsubScribe

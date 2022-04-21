@@ -15,7 +15,7 @@ public interface IKeyValueStore
     /// <param name="value">The value returned from the value store as type <typeparamref name="T"/> or a default value if not found</param>
     /// <returns>True if the value is found, false if not.</returns>
     /// <remarks>Serialization is done by the implementation of the key value store</remarks>
-    T TryGet<T>(string key);
+    bool TryGet<T>(string key, out T value);
 
     /// <summary>
     /// Get a value from the key value store, null if not found async
@@ -24,9 +24,9 @@ public interface IKeyValueStore
     /// <param name="key">The key to retrieve from the key value store</param>
     /// <param name="value">The value returned from the value store as type <typeparamref name="T"/> or a default value if not found</param>
     /// <param name="cancellationToken"><see cref="CancellationToken"/> to cancel the process</param>
-    /// <returns><see cref="Task"/> containing True if the value is found, false if not.</returns>
-    /// <remarks><see cref="Task"/> containing Serialization is done by the implementation of the key value store</remarks>
-    Task<T?> TryGetAsync<T>(string key, CancellationToken cancellationToken);
+    /// <returns><see cref="Task"/>containing Tuple of True if the value is found, false if not and contains the <typeparamref name="T"/></returns>
+    /// <remarks>Serialization is done by the implementation of the key value store</remarks>
+    Task<(bool success, T? value)> TryGetAsync<T>(string key, CancellationToken cancellationToken);
 
     #endregion
 
@@ -51,7 +51,7 @@ public interface IKeyValueStore
     /// <param name="cancellationToken">If the <see cref="CancellationToken"/> is set the watch/wait will be cancelled as soon as possible</param>
     /// <param name="waitTimeout">The maximum wait timeout to wait for a value</param>
     /// <returns><see cref="Task"/> containing The value of the key value store.</returns>
-    Task<T> GetUntilValueAsync<T>(string key, CancellationToken cancellationToken, TimeSpan waitTimeout);
+    Task<T?> GetUntilValueAsync<T>(string key, CancellationToken cancellationToken, TimeSpan waitTimeout);
 
     #endregion
     

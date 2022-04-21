@@ -31,6 +31,7 @@ public class WorkHandler
 /// </summary>
 public interface IDistributedWorkItem
 {
+    Guid Id { get; set; }
     bool IsDone { get; set; }
     bool HasPriority { get; }
 }
@@ -41,6 +42,7 @@ public interface IDistributedWorkItem
 /// </summary>
 public class WorkItem : IDistributedWorkItem
 {
+    public Guid Id { get; set; }
     public bool IsDone { get; set; }
     public bool HasPriority { get; set; }
 
@@ -131,8 +133,9 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
     /// <summary>
     /// Dequeues work items form the queue as long as the <seealso cref="_maxAmountOfParallelism"/> threshold is not reached
     /// </summary>
-    public async void ScheduleWorkItems()
+    public async Task ScheduleWorkItems()
     {
+        _log.LogInformation("Scheduler started");
         var tasks = new List<Task>(_maxAmountOfParallelism);
         
         while (!_queueProcessingCancellationToken.IsCancellationRequested)
@@ -150,8 +153,10 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
                 // create the actual work item task and start it immediately
                 var workItemTask = Task.Run(() =>
                 {
+                    _log.LogInformation("Running workitem");
                     _handleWorkFunction(workItem, _queueProcessingCancellationToken);
                     workItem.IsDone = true;
+                    workItem.Id = Guid.NewGuid();
                 }, _queueProcessingCancellationToken);
                 tasks.Add(workItemTask);
                 continue;
