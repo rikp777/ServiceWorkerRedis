@@ -1,8 +1,8 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Serilog;
 using StackExchange.Redis;
 
 
@@ -127,7 +127,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while getting key '{key}': {ex.Message}");
+            _log.Error($"Error while getting key '{key}': {ex.Message}");
             return false;
         }
 
@@ -158,7 +158,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while getting key '{key}': {ex.Message}");
+            _log.Error($"Error while getting key '{key}': {ex.Message}");
             return (false, default);
         }
 
@@ -194,7 +194,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
 
             var stringValue = db.StringGet(key);
 
-            _log.LogInformation("GetUntilValueAsync on '{KeyName}': took {TimeOutValue}", key, timeOut.Elapsed);
+            _log.Information("GetUntilValueAsync on '{KeyName}': took {TimeOutValue}", key, timeOut.Elapsed);
 
             return JsonSerializer.Deserialize<T>(stringValue);
         }
@@ -204,7 +204,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Error while getting value with subscription: {ErrorMessage}", ex.Message);
+            _log.Error(ex, "Error while getting value with subscription: {ErrorMessage}", ex.Message);
             return default;
         }
     }
@@ -242,7 +242,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
 
             var stringValue = await db.StringGetAsync(key);
 
-            _log.LogInformation("GetUntilValueAsync on '{KeyName}': took {TimeOutValue}", key, timeOut.Elapsed);
+            _log.Information("GetUntilValueAsync on '{KeyName}': took {TimeOutValue}", key, timeOut.Elapsed);
 
             var success = TryDeserialize(key, stringValue, out T? deserializedValue);
             return !success ? default : deserializedValue;
@@ -253,7 +253,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Error while getting value with subscription: {ErrorMessage}", ex.Message);
+            _log.Error(ex, "Error while getting value with subscription: {ErrorMessage}", ex.Message);
             return default;
         }
     }
@@ -284,7 +284,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         catch (Exception e)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
-            _log.LogError(e, $"Error whilesetting key {key} : {e.Message}");
+            _log.Error(e, $"Error whilesetting key {key} : {e.Message}");
             return false;
         }
     }
@@ -312,7 +312,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         catch (Exception e)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
-            _log.LogError(e, $"Error whilesetting key {key} : {e.Message}");
+            _log.Error(e, $"Error whilesetting key {key} : {e.Message}");
             return false;
         }
     }
@@ -341,7 +341,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception ex)
         {
-            _log.LogError(
+            _log.Error(
                 $"An error occurred while adding value {value} to the list with key {key} : {ex.Message}");
             return false;
         }
@@ -366,7 +366,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception ex)
         {
-            _log.LogError(
+            _log.Error(
                 $"An error occurred while adding value {value} to the list with key {key} : {ex.Message}");
             return false;
         }
@@ -395,7 +395,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception ex)
         {
-            _log.LogError(
+            _log.Error(
                 $"An error occurred while removing value {value} to the list with key {key} : {ex.Message}");
             return false;
         }
@@ -420,7 +420,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception ex)
         {
-            _log.LogError(
+            _log.Error(
                 $"An error occurred while removing value {value} to the list with key {key} : {ex.Message}");
             return false;
         }
@@ -444,7 +444,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"An error occurred while trying to retrieve the list from Redis with key {key}: {ex.Message}");
+            _log.Error($"An error occurred while trying to retrieve the list from Redis with key {key}: {ex.Message}");
             throw;
         }
     }
@@ -463,7 +463,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"An error occurred while trying to retrieve the list from Redis with key {key}: {ex.Message}");
+            _log.Error($"An error occurred while trying to retrieve the list from Redis with key {key}: {ex.Message}");
             throw;
         }
     }
@@ -502,14 +502,14 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         //Publish 
         try
         {
-            _log.LogInformation($"Publish on {topic} : {publishValue}");
+            //_log.LogInformation($"Publish on {topic} : {publishValue}");
             var sub = _redisConnection.GetSubscriber();
             _ = sub.Publish(topic, publishValue);
             return true;
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while publishing message to topic '{topic}': {ex.Message}");
+            _log.Error($"Error while publishing message to topic '{topic}': {ex.Message}");
             return false;
         }
     }
@@ -537,7 +537,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while publishing message to topic '{topic}': {ex.Message}");
+            _log.Error($"Error while publishing message to topic '{topic}': {ex.Message}");
             return false;
         }
     }
@@ -571,41 +571,36 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
     }
 
 
-    public async Task SubscribeConcurrentlyAsync(string topic, Action action, CancellationToken cancellationToken)
+    public async Task SubscribeConcurrentlyAsync<T>(string topic, Action action, CancellationToken cancellationToken) where T : IDistributedWorkItem 
     {
-        // var distributedWorkItem = action is IDistributedWorkItem;
-        // if (!distributedWorkItem)
-        // {
-        //     _log.LogInformation($"Given action is not a distributed work item: {topic}");
-        //     return;
-        // }
         topic = GetPrefixKey(topic);
-            
         
         var sub = _redisConnection.GetSubscriber();
+        
         var counter = 0;
         var distributedQueue = new DistributedQueue<IDistributedWorkItem?>(
             "Vertex",
             (item, token) =>
             {
-                action();
+                item.ExpensiveWork();
                 Interlocked.Increment(ref counter);
             },
-            NullLogger<DistributedQueue<IDistributedWorkItem?>>.Instance, 
+            _log, 
             10,
             cancellationToken
         );
-        _log.LogInformation($"Subscribed to topic: {topic}");
+        
+        
+        Log.Information("Starting sub..");
         var channelQueue = sub.Subscribe(topic);
-
-       
+        _log.Information($"Subscribed to topic: {topic}");
         channelQueue.OnMessage((m) =>
         {
-            _log.LogInformation($"New message on topic: {topic} worker {counter}");
-            var deserializedWorkItem = JsonSerializer.Deserialize<IDistributedWorkItem>(m.Message);
+            //_log.LogInformation($"New message on topic: {topic} worker {counter}");
+            var deserializedWorkItem = JsonSerializer.Deserialize<T>(m.Message);
             distributedQueue.TryEnqueueWorkItem(deserializedWorkItem);
         });
-        await Task.Run(() => distributedQueue.ScheduleWorkItems());
+        await Task.Run(() => distributedQueue.ScheduleWorkItems(), cancellationToken);
     }
 
     #endregion
@@ -628,7 +623,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception e)
         {
-            _log.LogError($"Error while unsubscribing from topic {topic} : {e.Message}");
+            _log.Error($"Error while unsubscribing from topic {topic} : {e.Message}");
             return false;
         }
     }
@@ -648,7 +643,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception e)
         {
-            _log.LogError($"Error while unsubscribing from topic {topic} : {e.Message}");
+            _log.Error($"Error while unsubscribing from topic {topic} : {e.Message}");
             return false;
         }
     }
@@ -682,7 +677,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while deserializing json string to object on topic {topic} : {ex.Message}");
+            _log.Error($"Error while deserializing json string to object on topic {topic} : {ex.Message}");
         }
 
         try
@@ -691,7 +686,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error while executing deserialized json {topic} : {ex.Message}");
+            _log.Error($"Error while executing deserialized json {topic} : {ex.Message}");
         }
     }
 
@@ -721,7 +716,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception e)
         {
-            _log.LogError($"Error during subscribe function: {e.Message}");
+            _log.Error($"Error during subscribe function: {e.Message}");
             return false;
         }
     }
@@ -751,7 +746,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         }
         catch(Exception e)
         {
-            _log.LogError($"Error during subscribe function: {e.Message}");
+            _log.Error($"Error during subscribe function: {e.Message}");
             return false;
         }
     }
@@ -808,7 +803,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         catch (Exception ex)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
-            _log.LogError($"Error while serializing object to json string from {topic} : {ex.Message}");
+            _log.Error($"Error while serializing object to json string from {topic} : {ex.Message}");
             return false;
         }
     }
@@ -831,7 +826,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         catch (Exception e)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
-            _log.LogError($"Error while serializing object to json string for value {value}: {e.Message}");
+            _log.Error($"Error while serializing object to json string for value {value}: {e.Message}");
             return false;
         }
     }
@@ -855,7 +850,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
         catch (Exception ex)
         {
             // ReSharper disable once TemplateIsNotCompileTimeConstantProblem
-            _log.LogError($"Error while deserializing json string to object for key '{key}': {ex.Message}");
+            _log.Error($"Error while deserializing json string to object for key '{key}': {ex.Message}");
             return false;
         }
     }

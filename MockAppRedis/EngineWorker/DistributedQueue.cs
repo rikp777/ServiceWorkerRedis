@@ -1,30 +1,10 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using ILogger = Serilog.ILogger;
 
 namespace MockAppRedis;
 
 using Task = Task;
-
-public class WorkHandler
-{
-    public void Run()
-    {
-        var cancellationTokenSource = new CancellationTokenSource();
-        var dq = new DistributedQueue<WorkItem>(
-            "somenamespace", 
-            new Action<WorkItem, CancellationToken>((item, token) =>
-            {
-                item.Run();
-            }),
-            default, 
-            10, 
-            cancellationTokenSource.Token
-        );
-        
-        // cancellationTokenSource.Cancel();
-    }
-}
-
 
 /// <summary>
 /// Distribute work item interface 
@@ -34,8 +14,9 @@ public interface IDistributedWorkItem
     Guid Id { get; set; }
     bool IsDone { get; set; }
     bool HasPriority { get; }
-}
 
+    void ExpensiveWork();
+}
 
 /// <summary>
 /// Some work item
@@ -45,40 +26,16 @@ public class WorkItem : IDistributedWorkItem
     public Guid Id { get; set; }
     public bool IsDone { get; set; }
     public bool HasPriority { get; set; }
+    public void ExpensiveWork()
+    {
+        throw new NotImplementedException();
+    }
 
     public WorkItem(bool isDone, bool hasPriority)
     {
         IsDone = isDone;
         HasPriority = hasPriority;
     }
-
-    public async Task Run()
-    {
-        Random random = new Random();
-   
-        for (int i = 0; i < random.Next(1000); i++)  
-        {  
-            Console.Write("{0} ", FibonacciSeries(i));  
-        }
-    }
-    
-    private int FibonacciSeries(int n)  
-    {  
-        int firstnumber = 0, secondnumber = 1, result = 0;  
-   
-        if (n == 0) return 0; //To return the first Fibonacci number   
-        if (n == 1) return 1; //To return the second Fibonacci number   
-   
-   
-        for (int i = 2; i <= n; i++)  
-        {  
-            result = firstnumber + secondnumber;  
-            firstnumber = secondnumber;  
-            secondnumber = result;  
-        }  
-   
-        return result;  
-    }  
 }
 
 //https://docs.microsoft.com/en-us/dotnet/api/system.threading.tasks.task?view=net-6.0
@@ -88,10 +45,18 @@ public class WorkItem : IDistributedWorkItem
 /// <typeparam name="TWorkItem">The type that implements the work item that is queued on the distributed queue</typeparam>
 public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
 {
+    /// <summary>
+    /// Constructor DistributedQueue
+    /// </summary>
+    /// <param name="queueNamespace">The que namespace </param>
+    /// <param name="handleWorkFunction">The function that needs to be handled in the worker</param>
+    /// <param name="log">The logger instance</param>
+    /// <param name="maxAmountOfParallelism">The max parallel workers that may exists</param>
+    /// <param name="queueProcessingCancellationToken">The cancellation token for canceling que work</param>
     public DistributedQueue(
         string queueNamespace, 
         Action<TWorkItem, CancellationToken> handleWorkFunction, 
-        ILogger<DistributedQueue<TWorkItem>> log,
+        ILogger log,
         int maxAmountOfParallelism,
         CancellationToken queueProcessingCancellationToken
         )
@@ -103,7 +68,7 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
         _queueProcessingCancellationToken = queueProcessingCancellationToken;
     }
 
-    private readonly ILogger<DistributedQueue<TWorkItem>> _log;
+    private readonly ILogger _log;
     private int _maxAmountOfParallelism;
     private readonly CancellationToken _queueProcessingCancellationToken;
 
@@ -135,11 +100,12 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
     /// </summary>
     public async Task ScheduleWorkItems()
     {
-        _log.LogInformation("Scheduler started");
+        _log.Information("Scheduler started");
         var tasks = new List<Task>(_maxAmountOfParallelism);
         
         while (!_queueProcessingCancellationToken.IsCancellationRequested)
         {
+            
             if (tasks.Count < _maxAmountOfParallelism)
             {
                 // There is space left in the task list, so we dequeue a work item to schedule
@@ -153,11 +119,11 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
                 // create the actual work item task and start it immediately
                 var workItemTask = Task.Run(() =>
                 {
-                    _log.LogInformation("Running workitem");
                     _handleWorkFunction(workItem, _queueProcessingCancellationToken);
                     workItem.IsDone = true;
                     workItem.Id = Guid.NewGuid();
                 }, _queueProcessingCancellationToken);
+                _log.Information($"{_queueNamespace} Running work item {workItem.Id} | current running {tasks.Count} workers parallel");
                 tasks.Add(workItemTask);
                 continue;
             }

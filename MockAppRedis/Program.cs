@@ -11,6 +11,7 @@ using MockAppRedis;
 using MockAppRedis.Extensions;
 using MockAppRedis.Redis;
 using Serilog;
+using ILogger = Serilog.ILogger;
 
 
 static void ConfigSetup(IConfigurationBuilder builder)
@@ -64,35 +65,32 @@ static IHost AppStartup()
 }
 
 var app = AppStartup();
-var logger = app.Services.GetService<ILogger<Program>>();
 
-var handler = new WorkHandler();
-handler.Run();
-
-
+var logger = Log.ForContext<Program>();
 var client = new RedisClient(new List<string>() {"localhost:6379"}, "testPrefix", logger);
-var calculation = new Calculation();
 
 
+var calculation = new Calculation(Guid.NewGuid(),20,20);
 var subTask = Task.Run(() =>
 {
-    Log.Information("Starting sub..");
-    client.SubscribeConcurrentlyAsync("test", calculation.PricingCalculation, CancellationToken.None);
+    
+    client.SubscribeConcurrentlyAsync<Calculation>("test", calculation.ExpensiveWork, CancellationToken.None);
 });
 
 await Task.Delay(100);
 
-var messages = new List<string>()
+var messages = new List<Calculation>()
 {
-    "TestMessage1",
-    "TestMessage2",
-    "TestMessage3"
+    new(Guid.NewGuid(),10,40),
+    new(Guid.NewGuid(),10,40),
+    new(Guid.NewGuid(),10,40)
 };
 
-for (var i = 0; i < 5000; i++)
+for (var i = 0; i < 1000; i++)
 {
-    messages.Add("TestMessage1" + i);
+    messages.Add(new Calculation(Guid.NewGuid(), i, i));
 }
+
 
 var pubTask = Task.Run(() =>
 {
@@ -102,7 +100,15 @@ var pubTask = Task.Run(() =>
     }
 });
 
+
 await pubTask;
+await Task.Delay(15000).ContinueWith((x) => {
+    foreach (var message in messages)
+    {
+        client.TryPublish("test", message);
+    }
+});
+
 
 
 
@@ -113,12 +119,41 @@ Console.ReadLine();
 
 public class Calculation : IDistributedWorkItem
 {
-    public void PricingCalculation()
-    {
-        Console.WriteLine("test");
-    }
-
+    private Random _random = new Random();
     public Guid Id { get; set; }
     public bool IsDone { get; set; }
     public bool HasPriority { get; }
+    public void ExpensiveWork()
+    {
+        PricingCalculation();
+    }
+
+    public int s1 { get; set; }
+    public int s2 { get; set; }
+
+    public Calculation(Guid id, int s1, int s2)
+    {
+        Id = id;
+        this.s1 = s1;
+        this.s2 = s2;
+    }
+
+    public async Task PricingCalculation()
+    {
+        var list = new List<int>();
+        for (var i = 0; i < 1000000; i++)
+        {
+            if (list.Contains(i))
+            {
+                list.Add(i);
+            }
+
+            list.Contains(i);
+            list.Contains(i);
+            list.Contains(i);
+            list.Contains(i);
+        }
+        await Task.Delay((_random.Next(10000) > 5000) ? 100 : 10000);
+        Console.WriteLine($"{IsDone} {Id} {s1} {s2}");
+    }
 }

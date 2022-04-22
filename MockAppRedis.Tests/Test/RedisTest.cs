@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging.Abstractions;
 using MockAppRedis.Redis;
 using NUnit.Framework;
+using Serilog;
 
 namespace MockAppRedis.Tests.Test;
 
@@ -50,7 +51,7 @@ public class RedisTest
     [OneTimeSetUp]
     public void OneTimeSetUp()
     {
-        var client = new RedisClient(new List<string>() {"localhost:6379"}, "testPrefix", NullLogger<RedisClient>.Instance);
+        var client = new RedisClient(new List<string>() {"localhost:6379"}, "testPrefix", Log.Logger);
 
         _redisKeyValueStore = client;
         _redisPubSub = client;

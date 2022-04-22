@@ -6,7 +6,6 @@ services:
     image: redis
     ports:
       - "6379:6379"  
-      
     
   redis-commander:
     container_name: redis-commander
