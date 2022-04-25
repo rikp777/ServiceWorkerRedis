@@ -66,6 +66,63 @@ public class DistributedQueueTests
         Assert.That(counter, Is.EqualTo(numberOfItems));
     }
 
+    [TestCase(5, 1)]
+    public void EnqueueAndProcessWorkItemWithPriority(int numberOfItems, int initialNumberOfParallelism)
+    {
+        if (Log.Logger.GetType().FullName == "Serilog.Core.Pipeline.SilentLogger")
+        {
+            Log.Logger = new LoggerConfiguration().MinimumLevel.Debug().WriteTo.Console().CreateLogger();
+            Log.Logger.Debug("Logger is not configured. Either this is a unit test or you have to configure the logger");
+        }
+
+        CancellationTokenSource source = new CancellationTokenSource();
+        CancellationToken token = source.Token;
+        var counter = 0;
+        var sut = new DistributedQueue<TestDistributedWorkItem>(QueueName, (item, token) =>
+            {
+                item.ExpensiveWork();
+                Interlocked.Increment(ref counter);
+            }, Log.Logger , initialNumberOfParallelism,
+            token);
+        
+        for (var i = 0; i < numberOfItems; i++)
+        {
+            var workItem = new TestDistributedWorkItem(false);
+            sut.TryEnqueueWorkItem(workItem);
+        }
+        for (var i = 0; i < numberOfItems; i++)
+        {
+            var workItem = new TestDistributedWorkItem(true);
+            sut.TryEnqueueWorkItem(workItem);
+        }
+
+        Task.Run(() => sut.ScheduleWorkItems());
+        
+        #region Waiting for completion...
+
+        var maxTimeItCanTake = numberOfItems * 10;
+        var minDelay = Math.Max(maxTimeItCanTake / 1000, 10);
+
+        // Check 1000th times if we are completed 
+        // Checks if que is not to slow 
+        for (var i = 0; i < 1000; i++)
+        {
+            if (counter == numberOfItems)
+            {
+                source.Cancel();
+                break;
+            }
+
+            Thread.Sleep(minDelay);
+        }
+
+        Assert.That(sut.GetPriorityWorkItemQueueCount == 0);
+        Assert.That(sut.GetWorkItemQueueCount == numberOfItems);
+        
+        #endregion
+    }
+    
+    
     
 }
 public class TestDistributedWorkItem : IDistributedWorkItem
@@ -77,6 +134,7 @@ public class TestDistributedWorkItem : IDistributedWorkItem
     public TestDistributedWorkItem(bool isPriority)
     {
         IsPriority = isPriority;
+        HasPriority = isPriority;
     }
 
     public bool IsPriority { get; set; }

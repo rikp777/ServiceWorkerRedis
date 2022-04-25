@@ -89,11 +89,15 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
     /// This is our temporary mock queue, should be replaced by a central queue where we can dequeue individual items
     /// </summary>
     private readonly ConcurrentQueue<TWorkItem> _workItemQueue = new();
-    
+
+    public int GetWorkItemQueueCount => _workItemQueue.Count;
+
     /// <summary>
     /// This is our temporary mock queue, should be replaced by a central queue where we can dequeue individual items
     /// </summary>
     private readonly ConcurrentQueue<TWorkItem> _priorityWorkItemQueue = new();
+    
+    public int GetPriorityWorkItemQueueCount => _priorityWorkItemQueue.Count;
 
     /// <summary>
     /// Dequeues work items form the queue as long as the <seealso cref="_maxAmountOfParallelism"/> threshold is not reached
@@ -105,7 +109,6 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
         
         while (!_queueProcessingCancellationToken.IsCancellationRequested)
         {
-            
             if (tasks.Count < _maxAmountOfParallelism)
             {
                 // There is space left in the task list, so we dequeue a work item to schedule
@@ -120,10 +123,11 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
                 var workItemTask = Task.Run(() =>
                 {
                     _handleWorkFunction(workItem, _queueProcessingCancellationToken);
+                    workItem.ExpensiveWork();
                     workItem.IsDone = true;
                     workItem.Id = Guid.NewGuid();
                 }, _queueProcessingCancellationToken);
-                _log.Information($"{_queueNamespace} Running work item {workItem.Id} | current running {tasks.Count} workers parallel");
+                _log.Information($"{_queueNamespace} Running work item {workItem.Id} 'priority: {workItem.HasPriority} | current running {tasks.Count} workers parallel");
                 tasks.Add(workItemTask);
                 continue;
             }
@@ -171,6 +175,17 @@ public class DistributedQueue<TWorkItem> where TWorkItem : IDistributedWorkItem
         
         return true;
     }
+
+    // public bool TryDequeueWorkItem(out TWorkItem workItem)
+    // {
+    //     workItem = default;
+    //     if (!_priorityWorkItemQueue.TryDequeue(out var workItemFrom) && !_workItemQueue.TryDequeue(out workItemFrom))
+    //     {
+    //         workItem = workItemFrom;
+    //         return true;
+    //     }
+    //     // return true;
+    // }
     
     /// <summary>
     /// Set the maximum number of work items that can be processed in parallel
