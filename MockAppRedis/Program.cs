@@ -2,6 +2,7 @@
 
 //setup our DI
 
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -11,6 +12,7 @@ using MockAppRedis;
 using MockAppRedis.Extensions;
 using MockAppRedis.Redis;
 using Serilog;
+using StackExchange.Redis;
 using ILogger = Serilog.ILogger;
 
 
@@ -73,43 +75,60 @@ var client = new RedisClient(new List<string>() {"localhost:6379"}, "testPrefix"
 var calculation = new Calculation(Guid.NewGuid(),20,20);
 var subTask = Task.Run(() =>
 {
-    
     client.SubscribeConcurrentlyAsync<Calculation>("test", calculation.ExpensiveWork, CancellationToken.None);
 });
+//
+// await Task.Delay(100);
+//
+// var messages = new List<Calculation>()
+// {
+//     new(Guid.NewGuid(),10,40),
+//     new(Guid.NewGuid(),10,40),
+//     new(Guid.NewGuid(),10,40)
+// };
+//
+// for (var i = 0; i < 1000; i++)
+// {
+//     messages.Add(new Calculation(Guid.NewGuid(), i, i));
+// }
+//
+//
+// var pubTask = Task.Run(() =>
+// {
+//     foreach (var message in messages)
+//     {
+//         client.TryPublish("test", message);
+//     }
+// });
+//
+//
+// await pubTask;
+// await Task.Delay(15000).ContinueWith((x) => {
+//     foreach (var message in messages)
+//     {
+//         client.TryPublish("test", message);
+//     }
+// });
 
-await Task.Delay(100);
 
-var messages = new List<Calculation>()
+
+var redisClientConnection = client.getRedisConnection();
+
+var db = redisClientConnection.GetDatabase();
+var topic = "testPrefix:test";
+Task.Run(async () =>
 {
-    new(Guid.NewGuid(),10,40),
-    new(Guid.NewGuid(),10,40),
-    new(Guid.NewGuid(),10,40)
-};
-
-for (var i = 0; i < 1000; i++)
-{
-    messages.Add(new Calculation(Guid.NewGuid(), i, i));
-}
-
-
-var pubTask = Task.Run(() =>
-{
-    foreach (var message in messages)
+    var random = new Random();
+    while (true)
     {
-        client.TryPublish("test", message);
+        var calculation = new Calculation(Guid.NewGuid(), random.Next(1000),random.Next(1000));
+        await db.StreamAddAsync(topic,
+            new NameValueEntry[] {new("data", JsonSerializer.Serialize(calculation))}
+        );
+        logger.Information($"{topic} - Produced message on stream");
+        await Task.Delay(10);
     }
 });
-
-
-await pubTask;
-await Task.Delay(15000).ContinueWith((x) => {
-    foreach (var message in messages)
-    {
-        client.TryPublish("test", message);
-    }
-});
-
-
 
 
 Console.ReadLine();

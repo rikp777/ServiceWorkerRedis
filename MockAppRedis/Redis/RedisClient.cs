@@ -1,5 +1,9 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
@@ -575,7 +579,7 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
     {
         topic = GetPrefixKey(topic);
         
-        var sub = _redisConnection.GetSubscriber();
+        var db = _redisConnection.GetDatabase();
         
         var counter = 0;
         var distributedQueue = new DistributedQueue<IDistributedWorkItem?>(
@@ -589,20 +593,57 @@ public sealed class RedisClient : IKeyValueStore, IPubSub
             10,
             cancellationToken
         );
-        
-        
-        Log.Information("Starting sub..");
-        var channelQueue = sub.Subscribe(topic);
-        _log.Information($"Subscribed to topic: {topic}");
-        channelQueue.OnMessage((m) =>
+
+        _log.Information($"Redis: reading stream off topic: {topic}");
+
+        var observable = CreateTaskFromStream(topic, cancellationToken);
+        observable.Subscribe(data =>
         {
-            //_log.LogInformation($"New message on topic: {topic} worker {counter}");
-            var deserializedWorkItem = JsonSerializer.Deserialize<T>(m.Message);
+            var deserializedWorkItem = JsonSerializer.Deserialize<T>(data);
             distributedQueue.TryEnqueueWorkItem(deserializedWorkItem);
         });
         await Task.Run(() => distributedQueue.ScheduleWorkItems(), cancellationToken);
     }
 
+    private IObservable<string> CreateTaskFromStream(
+        string topic, 
+        CancellationToken cancellationToken
+    )
+    {
+        var lastReadMessage = "0-0";
+        var db = _redisConnection.GetDatabase();
+        var lastReadMessageData = db.StringGet($"{topic}:lastReadMessage");
+        if (string.IsNullOrEmpty(lastReadMessageData))
+        {
+            db.StringGetSet($"{topic}:lastReadMessage", lastReadMessage);
+        } 
+        else
+        {
+            lastReadMessage = lastReadMessageData;
+        }
+        var instance = ThreadPoolScheduler.Instance;
+        return Observable.Create<string>(obs => 
+        {
+            var disposable = Observable
+                .Interval(TimeSpan.FromMilliseconds(200), instance)
+                .Subscribe(async _ => 
+                {
+                    var messages = await db.StreamReadAsync(topic, lastReadMessage);
+
+                    foreach(var message in messages)
+                    {
+                        _log.Information($"{topic}:message:{message.Id} {message.Values[0].Name} {message.Values[0].Value}");
+                        obs.OnNext($"{message.Values[0].Value}");
+                        lastReadMessage = message.Id;
+                    }
+
+                    db.KeyDelete($"{topic}:lastReadMessage");
+                    db.StringGetSet($"{topic}:lastReadMessage", lastReadMessage);
+                });
+            cancellationToken.Register(() => disposable.Dispose());
+            return Disposable.Empty;
+        });
+    }
     #endregion
     
     #region UnsubScribe 
